@@ -1,9 +1,10 @@
+# BoggersTheMind — headless autonomous exploration every 5 minutes
 name: Autonomous Exploration
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
-  workflow_dispatch:
+    - cron: "*/5 * * * *"  # Every 5 minutes
+  workflow_dispatch:  # Manual trigger
 
 permissions:
   contents: write
@@ -11,7 +12,7 @@ permissions:
 jobs:
   explore:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
 
     steps:
       - uses: actions/checkout@v4
@@ -19,29 +20,47 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # === Ollama setup (this was the missing piece) ===
+      # === Ollama (this was missing) ===
       - name: Install Ollama
         run: curl -fsSL https://ollama.com/install.sh | sh
 
       - name: Start Ollama server
         run: ollama serve &
 
-      - name: Wait for Ollama
-        run: sleep 10
-
-      - name: Pull model
-        run: ollama pull llama3.2:1b   # tiny & fast for CI (change to llama3.2 if you want the full one)
+      - name: Wait + pull lightweight model for CI
+        run: |
+          sleep 12
+          ollama pull llama3.2:1b
 
       # === Run the mind ===
       - name: Run headless autonomous explorer
-        run: python mind.py --headless
+        run: |
+          mkdir -p logs
+          python mind.py --headless 2>&1 | tee logs/autonomous.log
+        timeout-minutes: 9
 
-      # Debug output (always shows)
+      # === Debug ===
       - name: Show logs
         if: always()
-        run: cat logs/autonomous.log 2>/dev/null || echo "No log file - check mind.py output"
+        run: cat logs/autonomous.log 2>/dev/null || echo "No log file generated"
+
+      # === Commit (your original logic, made bulletproof) ===
+      - name: Commit vault and graph changes
+        run: |
+          git config user.name "BoggersTheMind Bot"
+          git config user.email "bot@boggersthemind.local"
+          
+          if git status --porcelain | grep -q .; then
+            git add obsidian/ data/ logs/ 2>/dev/null || true
+            git commit -m "Autonomous: new insights from exploration" || true
+            git push
+            echo "✅ Bot committed new insights!"
+          else
+            echo "ℹ️ No new insights this cycle (normal if graph was quiet)"
+          fi
+        if: always()
