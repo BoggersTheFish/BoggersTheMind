@@ -86,6 +86,13 @@ def synthesize(
             {"role": "system", "content": system},
             {"role": "user", "content": user_msg},
         ])
-        return response["message"]["content"].strip()
+        result = response["message"]["content"].strip()
+        # Data Factory instrumentation: record synthesis output
+        try:
+            from core.tracer import record_synthesis_output
+            record_synthesis_output(result or "")
+        except ImportError:
+            pass
+        return result
     except Exception:
         return None

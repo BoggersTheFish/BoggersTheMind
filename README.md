@@ -115,4 +115,43 @@ Enable the workflow, grant `contents: write`, and push. Your mind explores in th
 
 ---
 
+## Phase 1 — TS Data Factory
+
+Phase 1 generates 80k–150k high-quality structured reasoning traces for future LoRA fine-tuning of BoggersTheMind-1. Each trace captures the *internal cognitive process* of one full autonomous cycle.
+
+### Run commands
+
+```bash
+# Continuous mode — runs forever, saves every cycle (Ctrl+C to stop gracefully)
+python scripts/generate_ts_synthetic_data.py --mode continuous
+
+# Batch mode — run exactly N cycles (e.g. 1000)
+python scripts/generate_ts_synthetic_data.py --mode batch --cycles 1000
+
+# GitHub Actions — optimised for CI (~4 cycles, fits timeout)
+python scripts/generate_ts_synthetic_data.py --mode github
+```
+
+### TUI / headless with tracing
+
+```bash
+# TUI with trace generation enabled
+python mind.py --trace
+
+# Headless with trace generation
+python mind.py --headless --trace
+```
+
+### Output
+
+Traces are saved to `data/training/raw/trace_{cycle_id}.jsonl`. Each JSONL line has the full schema: `timestamp`, `cycle_id`, `graph_state_before`, `strongest_node`, `wave_propagation_steps`, `tensions_detected`, `hypothesis_queue`, `selected_hypothesis`, `query_pipeline_decisions`, `synthesis_output`, `graph_state_after`, `final_obsidian_note_path`, `metadata`.
+
+### Scaling
+
+- **Local**: Run `--mode continuous` overnight; traces accumulate in `data/training/raw/`.
+- **GitHub Actions**: Set repo variable `GENERATE_TRACES=true` (Settings → Actions → Variables). The workflow will run the generator and commit traces.
+- **Batch**: Use `--mode batch --cycles 1000` for a fixed run; combine multiple runs to reach 80k+ traces.
+
+---
+
 *BoggersTheMind — your mind, online.*

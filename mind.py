@@ -137,4 +137,8 @@ def main(headless: bool = False) -> None:
 
 if __name__ == "__main__":
     import sys
+    # Data Factory: --trace enables TS trace generation for future model training
+    if "--trace" in sys.argv:
+        from core.tracer import set_tracing_enabled
+        set_tracing_enabled(True)
     main(headless="--headless" in sys.argv)

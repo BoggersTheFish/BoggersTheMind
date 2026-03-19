@@ -165,3 +165,17 @@ class UniversalLivingGraph:
             nodes.discard(node_id)
         self.G.remove_node(node_id)
         self._save()
+
+    def export_snapshot(self) -> dict:
+        """Export graph state for Data Factory trace. Non-destructive snapshot."""
+        top = self.nodes_by_strength(limit=10)
+        top_strongest = [{"id": nid, "strength": s} for nid, s in top]
+        return {"node_count": self.node_count(), "top_strongest": top_strongest}
+
+    def get_strongest_node_with_reason(self) -> Optional[dict]:
+        """Return strongest node and reason for Data Factory trace."""
+        top = self.nodes_by_strength(limit=1)
+        if not top:
+            return None
+        nid, strength = top[0]
+        return {"id": nid, "reason": f"highest activation after wave (strength={strength})"}

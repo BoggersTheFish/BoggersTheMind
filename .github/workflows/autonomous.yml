@@ -40,11 +40,17 @@ jobs:
           sleep 15
           ollama pull llama3.2
 
-      # === Run the mind ===
+      # === Run the mind (or Data Factory trace generator) ===
       - name: Run headless autonomous explorer
+        env:
+          GENERATE_TRACES: ${{ vars.GENERATE_TRACES || 'false' }}
         run: |
-          mkdir -p logs
-          python mind.py --headless 2>&1 | tee logs/autonomous.log
+          mkdir -p logs data/training/raw
+          if [ "$GENERATE_TRACES" = "true" ]; then
+            python scripts/generate_ts_synthetic_data.py --mode github 2>&1 | tee logs/autonomous.log
+          else
+            python mind.py --headless 2>&1 | tee logs/autonomous.log
+          fi
         timeout-minutes: 10
 
       # === Debug output ===
@@ -52,7 +58,7 @@ jobs:
         if: always()
         run: cat logs/autonomous.log 2>/dev/null || echo "No log file generated"
 
-      # === Commit any new insights (your original logic, now 100% reliable) ===
+      # === Commit any new insights (and traces when GENERATE_TRACES=true) ===
       - name: Commit vault and graph changes
         run: |
           git config user.name "BoggersTheMind Bot"
@@ -60,6 +66,9 @@ jobs:
           
           if git status --porcelain | grep -q .; then
             git add obsidian/ data/ logs/ 2>/dev/null || true
+            if [ "$GENERATE_TRACES" = "true" ]; then
+              git add data/training/raw/ 2>/dev/null || true
+            fi
             git commit -m "Autonomous: new insights from exploration" || true
             git push
             echo "✅ Bot committed new insights!"
@@ -67,3 +76,5 @@ jobs:
             echo "ℹ️ No new insights this cycle (graph was quiet — normal)"
           fi
         if: always()
+        env:
+          GENERATE_TRACES: ${{ vars.GENERATE_TRACES || 'false' }}

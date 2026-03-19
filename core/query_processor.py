@@ -86,7 +86,7 @@ def process_query(
     score = _score_sufficiency(graph, relevant_nodes)
     sufficient = score >= SUFFICIENCY_SCORE_THRESHOLD or len(relevant_nodes) >= SUFFICIENCY_NODE_MIN
 
-    # Step 4: Research fallback if insufficient
+    # Step 4: Research fallback if insufficient (Data Factory: track wikipedia_ingest)
     research_done = []
     for _ in range(MAX_RESEARCH_ROUNDS):
         if sufficient:
@@ -102,6 +102,18 @@ def process_query(
                     state.feed_items.append(f"[dim]Researched: {topic}[/dim]")
         score = _score_sufficiency(graph, relevant_nodes)
         sufficient = score >= SUFFICIENCY_SCORE_THRESHOLD or len(relevant_nodes) >= SUFFICIENCY_NODE_MIN
+
+    # Data Factory instrumentation: record query pipeline decisions
+    try:
+        from core.tracer import record_query_pipeline_decisions
+        record_query_pipeline_decisions({
+            "wikipedia_ingest": len(research_done) > 0,
+            "sufficiency_score": score,
+            "topics": topics[:5],
+            "relevant_nodes_count": len(relevant_nodes),
+        })
+    except ImportError:
+        pass
 
     # Step 5: Synthesize
     context = graph.get_context(relevant_nodes, max_chars=2000)

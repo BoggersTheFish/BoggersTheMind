@@ -8,6 +8,9 @@ from typing import Optional
 
 from .graph import UniversalLivingGraph
 
+# Decay factor for Data Factory trace (wave propagation step metadata)
+WAVE_DECAY = 0.78
+
 
 def run_wave(
     graph: UniversalLivingGraph,
@@ -44,18 +47,32 @@ def run_wave(
     if not current:
         return []
 
-    # Step 2: Propagate — boost neighbors
+    # Step 2: Propagate — boost neighbors (Data Factory: record propagation steps)
+    propagation_steps = []
     for neighbor in graph.G.successors(current):
         old_s = graph.get_strength(neighbor)
-        graph.set_strength(neighbor, old_s + 0.3)
+        energy = 0.3
+        graph.set_strength(neighbor, old_s + energy)
+        propagation_steps.append({"node": neighbor, "energy": energy, "decay": WAVE_DECAY})
 
     for predecessor in graph.G.predecessors(current):
         old_s = graph.get_strength(predecessor)
-        graph.set_strength(predecessor, old_s + 0.2)
+        energy = 0.2
+        graph.set_strength(predecessor, old_s + energy)
+        propagation_steps.append({"node": predecessor, "energy": energy, "decay": WAVE_DECAY})
 
     # Step 3: Amplify — boost current node
     old_s = graph.get_strength(current)
-    graph.set_strength(current, old_s + 0.5)
+    energy = 0.5
+    graph.set_strength(current, old_s + energy)
+    propagation_steps.append({"node": current, "energy": energy, "decay": WAVE_DECAY})
+
+    try:
+        from .tracer import is_tracing_enabled, record_wave_propagation_steps
+        if is_tracing_enabled():
+            record_wave_propagation_steps(propagation_steps)
+    except ImportError:
+        pass
 
     # Step 4: Surface — collect top nodes (optionally within topic cluster)
     surfaced = graph.nodes_by_strength(limit=10)
