@@ -1,9 +1,10 @@
+# BoggersTheMind — headless autonomous exploration every 5 minutes
 name: Autonomous Exploration
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
-  workflow_dispatch:
+    - cron: "*/5 * * * *"  # Every 5 minutes
+  workflow_dispatch:  # Manual trigger
 
 permissions:
   contents: write
@@ -21,7 +22,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -49,7 +50,7 @@ jobs:
       - name: Run headless autonomous explorer (same as native)
         run: python mind.py --headless 2>&1 | tee autonomous.log
 
-      # === THIS WAS THE MISSING PIECE ===
+      # === Commit & push new insights ===
       - name: Commit & push new insights
         run: |
           git config user.name "autonomous-mind[bot]"
