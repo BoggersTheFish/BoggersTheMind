@@ -1,40 +1,70 @@
-# BoggersTheMind — headless autonomous exploration every 5 minutes.
-# No TUI, no user input. Commits new insights to the vault.
-
 name: Autonomous Exploration
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
-on:
-  schedule:
-    - cron: "*/5 * * * *"  # Every 5 minutes
-  workflow_dispatch:  # Allow manual trigger
-
 jobs:
   explore:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.12'
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run headless autonomous exploration
-        run: python mind.py --headless
-        timeout-minutes: 5
+      # === Reliable Ollama setup ===
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
 
-      - name: Commit vault and graph changes
+      - name: Start Ollama server
+        run: ollama serve &
+
+      - name: Wait for Ollama + pull model
         run: |
-          git config user.name "BoggersTheMind Bot"
-          git config user.email "bot@boggersthemind.local"
-          if [ -n "$(git status --porcelain obsidian/)" ]; then
-            git add obsidian/
-            git commit -m "Autonomous: new insights from exploration" || true
+          echo "Waiting for Ollama..."
+          sleep 8
+          for i in {1..20}; do
+            if ollama list &>/dev/null; then
+              echo "✅ Ollama ready"
+              break
+            fi
+            sleep 3
+          done
+          ollama pull llama3.2:1b   # fast & cheap for CI
+
+      - name: Run headless autonomous explorer (same as native)
+        run: python mind.py --headless 2>&1 | tee autonomous.log
+
+      # === THIS WAS THE MISSING PIECE ===
+      - name: Commit & push new insights
+        run: |
+          git config user.name "autonomous-mind[bot]"
+          git config user.email "41898282+autonomous-mind[bot]@users.noreply.github.com"
+          
+          if git diff --quiet obsidian/TS-Knowledge-Vault/; then
+            echo "No new insights this cycle"
+          else
+            git add obsidian/TS-Knowledge-Vault/
+            git commit -m "🧠 Autonomous: new insights & consolidations $(date '+%Y-%m-%d %H:%M')"
             git push
+            echo "✅ Pushed new insights to vault"
           fi
+        continue-on-error: true
+
+      - name: Show run log
+        if: always()
+        run: cat autonomous.log || echo "No log file generated"
