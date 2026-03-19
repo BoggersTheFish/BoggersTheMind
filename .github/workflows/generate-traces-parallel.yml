@@ -1,6 +1,7 @@
 # Generate Traces — Parallel Cloud Factory
 # Runs num_jobs parallel workers, each processing a chunk of total_cycles.
 # Cost-efficient: free tier, maximum throughput. No filename collisions (trace_job{N}_{cycle}.jsonl).
+# Timeout 360 min = GitHub free-tier max (runners have fast CPUs, no laptop limits).
 
 name: Generate Traces — Parallel Cloud Factory
 
@@ -17,6 +18,11 @@ on:
         required: false
         default: 12
         type: number
+      fast:
+        description: "Enable fast mode (disables 60s throttle for max speed on GitHub runners)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -39,7 +45,8 @@ jobs:
   generate:
     needs: prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 360 min = GitHub free-tier maximum; runners have fast CPUs, no laptop throttle needed
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
@@ -92,11 +99,16 @@ jobs:
       - name: Generate traces (parallel chunk)
         run: |
           mkdir -p data/training/raw logs
+          FAST_FLAG=""
+          if [ "${{ inputs.fast }}" = "true" ]; then
+            FAST_FLAG="--fast"
+          fi
           python scripts/generate_ts_synthetic_data.py \
             --mode batch \
             --cycles ${{ steps.chunk.outputs.cycles }} \
             --start-cycle ${{ steps.chunk.outputs.start_cycle }} \
             --job-id ${{ matrix.job_id }} \
+            $FAST_FLAG \
             2>&1 | tee logs/job_${{ matrix.job_id }}.log
 
       - name: Upload traces artifact

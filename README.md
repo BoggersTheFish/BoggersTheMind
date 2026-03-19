@@ -152,10 +152,11 @@ Scale trace generation using **GitHub Actions parallel matrix** — free tier, m
 
 1. Go to **Actions** → **Generate Traces — Parallel Cloud Factory** → **Run workflow**
 2. Use defaults: **total_cycles: 2000**, **num_jobs: 12**
-3. Each of 12 jobs runs ~167 cycles in parallel; traces use `trace_job{N}_{cycle}.jsonl` (no collisions)
-4. Merge job commits all traces in one push
+3. Set **fast: true** for maximum speed (recommended for trace generation; disables 60s throttle on GitHub runners)
+4. Each of 12 jobs runs ~167 cycles in parallel; traces use `trace_job{N}_{cycle}.jsonl` (no collisions)
+5. Merge job commits all traces in one push
 
-**Estimated time**: ~25–30 min for 2000 traces (12 parallel runners, ~45s/cycle).  
+**Estimated time**: ~25–30 min for 2000 traces (12 parallel runners, ~45s/cycle). With fast=true, faster.  
 **Trace yield**: ~2000 per run; trigger multiple runs to reach 80k+.
 
 ### Scaling

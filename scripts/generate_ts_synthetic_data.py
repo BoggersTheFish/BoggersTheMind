@@ -5,6 +5,7 @@ Runs the autonomous explorer with tracing enabled. Saves to data/training/raw/.
 """
 
 import argparse
+import os
 import signal
 import sys
 from pathlib import Path
@@ -45,7 +46,15 @@ def main() -> None:
         default=None,
         help="Starting cycle_id for this job (parallel chunk offset).",
     )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Disable 60s throttle (for GitHub runners; set BOGGERS_FAST_MODE=1)",
+    )
     args = parser.parse_args()
+
+    if args.fast:
+        os.environ["BOGGERS_FAST_MODE"] = "1"
 
     # Enable tracing before any imports that use it
     from core.tracer import set_tracing_enabled, set_trace_job_id
@@ -102,6 +111,8 @@ def main() -> None:
         signal.signal(signal.SIGTERM, on_sigint)
 
     console.print(f"[bold]TS Data Factory[/bold] - mode={args.mode}, output={args.output_dir}")
+    if args.fast:
+        console.print("[yellow]Fast mode enabled (throttle disabled for GitHub)[/yellow]")
     if args.job_id is not None:
         console.print(f"Job [cyan]{args.job_id}[/cyan] starting at cycle [cyan]{start_cycle or 0}[/cyan] ([cyan]{max_cycles or '?'}[/cyan] cycles)")
     elif max_cycles:
