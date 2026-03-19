@@ -94,9 +94,11 @@ Notes live at `obsidian/TS-Knowledge-Vault`. The bridge watches for changes and 
 
 ---
 
-## GitHub Actions (Cloud Auto Mode)
+## GitHub Actions (Cloud Auto Mode) — *Currently disabled*
 
-Push the repo to GitHub to enable **headless autonomous exploration** every 5 minutes:
+*Workflows are disabled at this stage (see `.github/workflows/WORKFLOWS_DISABLED.md`). CPU-only runners are inefficient; Phase 3 pod training is the preferred path.*
+
+Push the repo to GitHub to enable **headless autonomous exploration** every 5 minutes (when re-enabled):
 
 - No TUI, no user input
 - Runs the same autonomous explorer (hypothesis → query pipeline → consolidation → write insights)
@@ -241,6 +243,106 @@ together fine-tuning create \
 - **Validation split**: Use 90/10 train/val; pass `--validation-file` and `--n-evals 10` to the fine-tune job.
 - **Fireworks**: Same ShareGPT format; use Fireworks fine-tuning API if preferred.
 - **Local (vLLM/Unsloth)**: Export ShareGPT JSONL and use your preferred LoRA trainer.
+
+---
+
+## Phase 3 — Full Cloud Pipeline (Unsloth on Vast.ai/RunPod)
+
+Train **BoggersTheMind-1** end-to-end on a rented GPU pod: generate traces → process → Unsloth QLoRA fine-tune. One command does everything.
+
+### 1. Rent a GPU pod
+
+| Provider | GPU | Est. price/hr | Link |
+|----------|-----|---------------|------|
+| **Vast.ai** | RTX 4090 24GB | ~$0.25–$0.35 | [vast.ai](https://cloud.vast.ai/create/) |
+| **Vast.ai** | A100 PCIe 40GB | ~$0.29–$0.45 | [vast.ai](https://cloud.vast.ai/create/) |
+| **RunPod** | RTX 4090 | ~$0.44 | [runpod.io](https://www.runpod.io/console/pods) |
+| **RunPod** | A100 40GB | ~$0.59 | [runpod.io](https://www.runpod.io/console/pods) |
+
+Pick an **RTX 4090** or **A100 40GB** instance. SSH into the pod once it’s running.
+
+### 2. Run the pipeline
+
+```bash
+# Clone repo (or upload your project)
+git clone https://github.com/YOUR_USER/BoggersTheHiveMind.git
+cd BoggersTheHiveMind
+
+# One command: install + generate + process + train
+bash scripts/run_on_pod.sh --cycles 1000 --model qwen14b --epochs 1
+```
+
+**CLI options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--cycles` | 1000 | Number of trace cycles to generate |
+| `--model` | qwen14b | Base model: `qwen14b` or `llama8b` |
+| `--epochs` | 1 | Training epochs |
+
+**Example (cheaper, faster):**
+
+```bash
+bash scripts/run_on_pod.sh --cycles 500 --model llama8b --epochs 1
+```
+
+### 3. Cost estimate
+
+| Cycles | Model | Epochs | Est. time | Est. cost |
+|--------|-------|--------|-----------|-----------|
+| 500 | llama8b | 1 | ~1–1.5 hrs | ~$15–$25 |
+| 1000 | qwen14b | 1 | ~2–2.5 hrs | ~$25–$35 |
+| 1000 | qwen14b | 2 | ~3 hrs | ~$35–$45 |
+
+*Assumes ~$0.30–$0.35/hr (Vast.ai RTX 4090 / A100).*
+
+### 4. Download the model
+
+Model is saved to `outputs/boggersmind-1/` on the pod.
+
+**Option A — SCP**
+
+```bash
+scp -r root@<POD_IP>:/workspace/BoggersTheHiveMind/outputs/boggersmind-1 ./boggersmind-1
+```
+
+**Option B — Rsync**
+
+```bash
+rsync -avz root@<POD_IP>:/workspace/BoggersTheHiveMind/outputs/boggersmind-1/ ./boggersmind-1/
+```
+
+**Option C — Upload to Hugging Face**
+
+```bash
+# On the pod, after training
+pip install huggingface_hub
+huggingface-cli login
+python -c "
+from huggingface_hub import HfApi
+api = HfApi()
+api.upload_folder('outputs/boggersmind-1', repo_id='YOUR_USER/boggersmind-1', repo_type='model')
+"
+```
+
+### 5. Use the model
+
+**Python (transformers + PEFT):**
+
+```python
+from unsloth import FastLanguageModel
+
+model, tokenizer = FastLanguageModel.from_pretrained(
+    "path/to/boggersmind-1",
+    max_seq_length=2048,
+)
+FastLanguageModel.for_inference(model)
+response, _ = model.generate(...)
+```
+
+**Ollama:** Merge the LoRA into the base model, then create a Modelfile. See [Unsloth docs](https://docs.unsloth.ai) for merge instructions.
+
+**In BoggersTheMind:** Point your inference layer (e.g. `entities/inference.py` or a future `llm_router.py`) to load this model instead of the default Ollama model for synthesis.
 
 ---
 

@@ -1,0 +1,37 @@
+#!/bin/bash
+# One-command setup for Vast.ai / RunPod — installs deps, runs full cloud pipeline.
+# Usage: bash scripts/run_on_pod.sh [--cycles 1000] [--model qwen14b|llama8b] [--epochs 1]
+
+set -e
+cd "$(dirname "$0")/.."
+ROOT="$(pwd)"
+
+echo "=== BoggersTheMind-1 — Pod Setup ==="
+echo "Root: $ROOT"
+
+# 1. Python venv (if not already in one)
+if [ -z "$VIRTUAL_ENV" ]; then
+    if [ ! -d "venv" ]; then
+        echo "Creating venv..."
+        python3 -m venv venv
+    fi
+    echo "Activating venv..."
+    . venv/bin/activate
+fi
+
+# 2. Base deps (mind + trace gen + processor)
+echo "Installing base dependencies..."
+pip install -q -r requirements.txt
+
+# 3. Unsloth + training deps (separate to avoid conflicts)
+echo "Installing Unsloth + training stack..."
+pip install -q unsloth
+pip install -q "trl>=0.13" "datasets" "transformers" "accelerate" "bitsandbytes" "peft"
+
+# 4. Run full pipeline
+echo ""
+echo "Starting full cloud pipeline..."
+python scripts/full_cloud_train.py "$@"
+
+echo ""
+echo "=== Done. Model at outputs/boggersmind-1 ==="
