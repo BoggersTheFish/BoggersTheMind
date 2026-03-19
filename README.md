@@ -154,4 +154,79 @@ Traces are saved to `data/training/raw/trace_{cycle_id}.jsonl`. Each JSONL line 
 
 ---
 
+## Phase 2 — Training BoggersTheMind-1
+
+Phase 2 turns raw traces into a clean, ready-to-train dataset for LoRA fine-tuning on Qwen2.5-72B or Llama-3.3-70B.
+
+### 1. Process raw traces
+
+```bash
+# Process all traces in data/training/raw/
+python scripts/process_training_data.py
+
+# Test with limited traces
+python scripts/process_training_data.py --max-traces 100
+
+# Include short cycles (e.g. for testing with synthetic traces)
+python scripts/process_training_data.py --min-duration 0
+```
+
+Output: `data/training/final/boggersmind-ts-traces-{timestamp}.jsonl` in ShareGPT format.
+
+**Quality filters** (configurable in script): duration ≥ 10s, non-empty synthesis, graph has nodes.
+
+### 2. Upload and fine-tune (Together AI)
+
+```bash
+# Set API key
+export TOGETHER_API_KEY=your_key
+
+# Dry run: print commands and cost estimate only
+python scripts/upload_to_together.py --dry-run
+
+# Upload and create LoRA fine-tuning job
+python scripts/upload_to_together.py
+```
+
+**LoRA config**: rank=64, alpha=16, dropout=0.05, target_modules=all-linear.
+
+**Base models**:
+- `Qwen/Qwen2.5-72B-Instruct` (default)
+- `meta-llama/Llama-3.3-70B-Instruct-Reference`
+
+### 3. Manual CLI (if preferred)
+
+```bash
+# Upload
+together files upload data/training/final/boggersmind-ts-traces-YYYYMMDD-HHMMSS.jsonl
+
+# Create job (replace FILE_ID)
+together fine-tuning create \
+  --training-file "FILE_ID" \
+  --model "Qwen/Qwen2.5-72B-Instruct" \
+  --lora \
+  --n-epochs 3 \
+  --learning-rate 1e-5 \
+  --train-on-inputs auto \
+  --suffix "boggersmind-ts"
+```
+
+### 4. Estimated costs
+
+| Dataset size | Epochs | Est. tokens | Est. cost (LoRA, 70B) |
+|--------------|--------|-------------|------------------------|
+| 1k traces    | 3      | ~15M        | ~$40                   |
+| 10k traces   | 3      | ~150M       | ~$375                  |
+| 80k traces   | 3      | ~1.2B       | ~$3,000                |
+
+*Check [together.ai/pricing](https://together.ai/pricing) for current rates. LoRA is cheaper than full fine-tuning.*
+
+### 5. Next steps
+
+- **Validation split**: Use 90/10 train/val; pass `--validation-file` and `--n-evals 10` to the fine-tune job.
+- **Fireworks**: Same ShareGPT format; use Fireworks fine-tuning API if preferred.
+- **Local (vLLM/Unsloth)**: Export ShareGPT JSONL and use your preferred LoRA trainer.
+
+---
+
 *BoggersTheMind — your mind, online.*
