@@ -1,0 +1,40 @@
+# BoggersTheMind — headless autonomous exploration every 5 minutes.
+# No TUI, no user input. Commits new insights to the vault.
+
+name: Autonomous Exploration
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"  # Every 5 minutes
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run headless autonomous exploration
+        run: python mind.py --headless
+        timeout-minutes: 5
+
+      - name: Commit vault and graph changes
+        run: |
+          git config user.name "BoggersTheMind Bot"
+          git config user.email "bot@boggersthemind.local"
+          if [ -n "$(git status --porcelain obsidian/)" ]; then
+            git add obsidian/
+            git commit -m "Autonomous: new insights from exploration" || true
+            git push
+          fi
