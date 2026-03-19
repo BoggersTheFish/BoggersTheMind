@@ -178,11 +178,16 @@ def save_trace(trace: dict, output_dir: Optional[Path] = None) -> Optional[Path]
     cycle_id = trace.get("cycle_id", 0)
     # Parallel mode: trace_job{N}_{cycle}.jsonl to prevent collisions across jobs
     if _TRACE_JOB_ID is not None:
-        filepath = output_dir / f"trace_job{_TRACE_JOB_ID:02d}_{cycle_id:05d}.jsonl"
+        fname = f"trace_job{_TRACE_JOB_ID:02d}_{cycle_id:05d}.jsonl"
+        filepath = output_dir / fname
     else:
-        filepath = output_dir / f"trace_{cycle_id}.jsonl"
+        fname = f"trace_{cycle_id}.jsonl"
+        filepath = output_dir / fname
     filled = _fill_missing(trace)
     filepath.write_text(json.dumps(filled, ensure_ascii=False) + "\n", encoding="utf-8")
+    # Tracker: visible in GitHub Actions logs
+    if _TRACE_JOB_ID is not None:
+        print(f"[Job {_TRACE_JOB_ID}] Saved {fname}", flush=True)
     return filepath
 
 

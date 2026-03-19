@@ -7,7 +7,7 @@ Feeds from hypothesis queue (insight, consolidation, simulation push) or generat
 import random
 import time
 from contextlib import nullcontext
-from typing import Optional, Any
+from typing import Callable, Optional, Any
 
 from core.graph import UniversalLivingGraph
 from core.wave import run_wave
@@ -90,6 +90,7 @@ def run_autonomous_explorer(
     headless: bool = False,
     max_cycles: Optional[int] = None,
     start_cycle: Optional[int] = None,
+    on_cycle_complete: Optional[Callable[[int, int], None]] = None,
 ) -> None:
     """
     Main autonomous loop. Boots in Auto mode.
@@ -208,6 +209,14 @@ def run_autonomous_explorer(
                 state.last_action = f"Error: {str(e)[:30]}"
 
         time.sleep(EXPLORER_CYCLE_INTERVAL)
+
+        # Progress tracker: notify after each cycle (for parallel job visibility)
+        if on_cycle_complete and max_cycles is not None:
+            if start_cycle is not None:
+                completed = _cycle_id - start_cycle + 1
+            else:
+                completed = _cycle_id
+            on_cycle_complete(completed, max_cycles)
 
         # Stop: after max_cycles cycles. In chunk mode, stop when _cycle_id >= start_cycle + max_cycles - 1
         if max_cycles is not None:

@@ -1,7 +1,7 @@
 # Generate Traces — Parallel Cloud Factory
 # Runs num_jobs parallel workers, each processing a chunk of total_cycles.
 # Cost-efficient: free tier, maximum throughput. No filename collisions (trace_job{N}_{cycle}.jsonl).
-# Timeout 360 min = GitHub free-tier max (runners have fast CPUs, no laptop limits).
+# Timeout 360 min = GitHub free-tier max. Progress trackers visible in logs (cycle % per job).
 
 name: Generate Traces — Parallel Cloud Factory
 
@@ -96,6 +96,7 @@ jobs:
           echo "start_cycle=$START" >> $GITHUB_OUTPUT
           echo "Job $JOB: start=$START, cycles=$CYCLES"
 
+      # Progress trackers: cycle X/Y (Z%) and "Job X FINISHED chunk" visible in logs
       - name: Generate traces (parallel chunk)
         run: |
           mkdir -p data/training/raw logs

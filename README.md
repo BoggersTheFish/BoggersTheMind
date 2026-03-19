@@ -157,7 +157,8 @@ Scale trace generation using **GitHub Actions parallel matrix** — free tier, m
 5. Merge job commits all traces in one push
 
 **Estimated time**: ~25–30 min for 2000 traces (12 parallel runners, ~45s/cycle). With fast=true, faster.  
-**Trace yield**: ~2000 per run; trigger multiple runs to reach 80k+.
+**Trace yield**: ~2000 per run; trigger multiple runs to reach 80k+.  
+**Progress trackers** now visible in logs (cycle % per job, "Job X FINISHED chunk").
 
 ### Scaling
 

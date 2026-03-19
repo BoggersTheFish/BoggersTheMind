@@ -120,6 +120,15 @@ def main() -> None:
     else:
         console.print("Running continuously. Ctrl+C to stop gracefully.")
 
+    # Progress tracker: cycle X/Y (Z%) per job for visibility in logs
+    job_id = args.job_id
+    def on_cycle(completed: int, total: int) -> None:
+        pct = int(100 * completed / total) if total else 0
+        prefix = f"[Job {job_id}] " if job_id is not None else ""
+        console.print(f"{prefix}Cycle {completed}/{total} completed ({pct}%)")
+
+    on_cycle_cb = on_cycle if max_cycles else None
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -134,9 +143,13 @@ def main() -> None:
                 headless=True,
                 max_cycles=max_cycles,
                 start_cycle=start_cycle,
+                on_cycle_complete=on_cycle_cb,
             )
         except KeyboardInterrupt:
             pass
+
+    if job_id is not None and max_cycles:
+        console.print(f"[Job {job_id}] FINISHED chunk - {max_cycles} cycles completed")
 
     trace_count = len(list(args.output_dir.glob("trace_*.jsonl")))
     console.print(f"\n[green]Done.[/green] Traces saved: [cyan]{trace_count}[/cyan] in {args.output_dir}")

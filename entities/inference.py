@@ -2,12 +2,12 @@
 Ollama Inference — reasoning grounded in the living graph. Throttled to 1 call per 60s.
 """
 
+import os
 import time
 from typing import Optional
 
 import ollama
 
-from core.config import is_fast_mode
 from core.graph import UniversalLivingGraph
 from core.wave import run_wave
 
@@ -20,7 +20,7 @@ MODEL = "llama3.2"
 def _throttle() -> bool:
     """Return True if we can make a call, False if we must wait."""
     # Fast mode disables throttle on GitHub runners (fast CPUs, no laptop limits)
-    if is_fast_mode():
+    if os.environ.get("BOGGERS_FAST_MODE") == "1":
         return True
     global LAST_CALL_TIME
     now = time.time()
