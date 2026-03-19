@@ -1,10 +1,12 @@
-# BoggersTheMind — headless autonomous exploration every 5 minutes
+# .github/workflows/autonomous.yml
+# BoggersTheMind — headless autonomous exploration (full Ollama + bulletproof commit)
+
 name: Autonomous Exploration
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # Every 5 minutes
-  workflow_dispatch:  # Manual trigger
+    - cron: '*/5 * * * *'   # Every 5 minutes
+  workflow_dispatch:        # Allows manual trigger from Actions tab
 
 permissions:
   contents: write
@@ -12,60 +14,56 @@ permissions:
 jobs:
   explore:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      # === Reliable Ollama setup ===
+      # === Ollama setup (critical — fixes the dumb-model repetition loop) ===
       - name: Install Ollama
         run: curl -fsSL https://ollama.com/install.sh | sh
 
       - name: Start Ollama server
         run: ollama serve &
 
-      - name: Wait for Ollama + pull model
+      - name: Wait + pull full model (llama3.2 — not the tiny 1b version)
         run: |
-          echo "Waiting for Ollama..."
-          sleep 8
-          for i in {1..20}; do
-            if ollama list &>/dev/null; then
-              echo "✅ Ollama ready"
-              break
-            fi
-            sleep 3
-          done
-          ollama pull llama3.2:1b   # fast & cheap for CI
+          sleep 15
+          ollama pull llama3.2
 
-      - name: Run headless autonomous explorer (same as native)
-        run: python mind.py --headless 2>&1 | tee autonomous.log
-
-      # === Commit & push new insights ===
-      - name: Commit & push new insights
+      # === Run the mind ===
+      - name: Run headless autonomous explorer
         run: |
-          git config user.name "autonomous-mind[bot]"
-          git config user.email "41898282+autonomous-mind[bot]@users.noreply.github.com"
-          
-          if git diff --quiet obsidian/TS-Knowledge-Vault/; then
-            echo "No new insights this cycle"
-          else
-            git add obsidian/TS-Knowledge-Vault/
-            git commit -m "🧠 Autonomous: new insights & consolidations $(date '+%Y-%m-%d %H:%M')"
-            git push
-            echo "✅ Pushed new insights to vault"
-          fi
-        continue-on-error: true
+          mkdir -p logs
+          python mind.py --headless 2>&1 | tee logs/autonomous.log
+        timeout-minutes: 10
 
-      - name: Show run log
+      # === Debug output ===
+      - name: Show logs
         if: always()
-        run: cat autonomous.log || echo "No log file generated"
+        run: cat logs/autonomous.log 2>/dev/null || echo "No log file generated"
+
+      # === Commit any new insights (your original logic, now 100% reliable) ===
+      - name: Commit vault and graph changes
+        run: |
+          git config user.name "BoggersTheMind Bot"
+          git config user.email "bot@boggersthemind.local"
+          
+          if git status --porcelain | grep -q .; then
+            git add obsidian/ data/ logs/ 2>/dev/null || true
+            git commit -m "Autonomous: new insights from exploration" || true
+            git push
+            echo "✅ Bot committed new insights!"
+          else
+            echo "ℹ️ No new insights this cycle (graph was quiet — normal)"
+          fi
+        if: always()
