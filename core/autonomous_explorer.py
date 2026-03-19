@@ -89,13 +89,16 @@ def run_autonomous_explorer(
     state: Optional[Any] = None,
     headless: bool = False,
     max_cycles: Optional[int] = None,
+    start_cycle: Optional[int] = None,
 ) -> None:
     """
     Main autonomous loop. Boots in Auto mode.
     Each cycle: check user_requested → if so, yield safely → else generate hypothesis → process → consolidate.
-    Data Factory: max_cycles stops after N cycles (for batch trace generation).
+    Data Factory: max_cycles stops after N cycles. start_cycle sets initial cycle_id (for parallel chunking).
     """
     global _cycle_id
+    if start_cycle is not None:
+        _cycle_id = start_cycle - 1  # First increment gives start_cycle
     topic_index = 0
 
     while True:
@@ -206,5 +209,10 @@ def run_autonomous_explorer(
 
         time.sleep(EXPLORER_CYCLE_INTERVAL)
 
-        if max_cycles is not None and _cycle_id >= max_cycles:
-            return
+        # Stop: after max_cycles cycles. In chunk mode, stop when _cycle_id >= start_cycle + max_cycles - 1
+        if max_cycles is not None:
+            if start_cycle is not None:
+                if _cycle_id >= start_cycle + max_cycles - 1:
+                    return
+            elif _cycle_id >= max_cycles:
+                return

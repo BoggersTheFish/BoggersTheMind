@@ -1,0 +1,146 @@
+# Generate Traces — Parallel Cloud Factory
+# Runs num_jobs parallel workers, each processing a chunk of total_cycles.
+# Cost-efficient: free tier, maximum throughput. No filename collisions (trace_job{N}_{cycle}.jsonl).
+
+name: Generate Traces — Parallel Cloud Factory
+
+on:
+  workflow_dispatch:
+    inputs:
+      total_cycles:
+        description: "Total cycles to generate across all jobs"
+        required: false
+        default: 2000
+        type: number
+      num_jobs:
+        description: "Number of parallel jobs (matrix size)"
+        required: false
+        default: 12
+        type: number
+
+permissions:
+  contents: write
+
+jobs:
+  # Prepare: output matrix of job_ids for dynamic parallel size
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set matrix
+        id: set-matrix
+        run: |
+          N=${{ inputs.num_jobs }}
+          arr=$(seq 0 $((N - 1)) | paste -sd, -)
+          echo "matrix=[$arr]" >> $GITHUB_OUTPUT
+
+  # Parallel generation: each job gets a unique chunk [start_cycle, start_cycle + cycles_per_job)
+  generate:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        job_id: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    env:
+      TOTAL_CYCLES: ${{ inputs.total_cycles }}
+      NUM_JOBS: ${{ inputs.num_jobs }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Start Ollama
+        run: ollama serve &
+
+      - name: Pull model
+        run: |
+          sleep 15
+          ollama pull llama3.2
+
+      - name: Compute chunk for this job
+        id: chunk
+        run: |
+          TOTAL=${{ env.TOTAL_CYCLES }}
+          N=${{ env.NUM_JOBS }}
+          JOB=${{ matrix.job_id }}
+          CYCLES_PER_JOB=$((TOTAL / N))
+          REMAINDER=$((TOTAL % N))
+          if [ "$JOB" -lt "$REMAINDER" ]; then
+            CYCLES=$((CYCLES_PER_JOB + 1))
+            START=$((JOB * (CYCLES_PER_JOB + 1)))
+          else
+            CYCLES=$CYCLES_PER_JOB
+            START=$((REMAINDER * (CYCLES_PER_JOB + 1) + (JOB - REMAINDER) * CYCLES_PER_JOB))
+          fi
+          echo "cycles=$CYCLES" >> $GITHUB_OUTPUT
+          echo "start_cycle=$START" >> $GITHUB_OUTPUT
+          echo "Job $JOB: start=$START, cycles=$CYCLES"
+
+      - name: Generate traces (parallel chunk)
+        run: |
+          mkdir -p data/training/raw logs
+          python scripts/generate_ts_synthetic_data.py \
+            --mode batch \
+            --cycles ${{ steps.chunk.outputs.cycles }} \
+            --start-cycle ${{ steps.chunk.outputs.start_cycle }} \
+            --job-id ${{ matrix.job_id }} \
+            2>&1 | tee logs/job_${{ matrix.job_id }}.log
+
+      - name: Upload traces artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: traces-job-${{ matrix.job_id }}
+          path: data/training/raw/
+          retention-days: 1
+
+  # Merge all job artifacts and commit (no conflicts: each job wrote trace_job{N}_*.jsonl)
+  merge:
+    needs: generate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all trace artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: traces-job-*
+          merge-multiple: true
+          path: data/training/raw
+
+      - name: Count traces and summary
+        id: summary
+        run: |
+          COUNT=$(find data/training/raw -name "trace_*.jsonl" 2>/dev/null | wc -l)
+          echo "trace_count=$COUNT" >> $GITHUB_OUTPUT
+          echo "=== Parallel trace generation complete ==="
+          echo "Total traces: $COUNT"
+          ls -la data/training/raw/ 2>/dev/null || true
+
+      - name: Commit and push traces
+        run: |
+          git config user.name "BoggersTheMind Bot"
+          git config user.email "bot@boggersthemind.local"
+          git add data/training/raw/
+          if git diff --staged --quiet; then
+            echo "No new traces to commit (all jobs may have been throttled or empty)"
+          else
+            git commit -m "Parallel traces: ${{ steps.summary.outputs.trace_count }} from workflow"
+            git push
+            echo "Pushed ${{ steps.summary.outputs.trace_count }} traces"
+          fi

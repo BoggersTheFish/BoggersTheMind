@@ -18,14 +18,22 @@ _tracing_enabled: ContextVar[bool] = ContextVar("tracing_enabled", default=False
 # Module-level flag for headless/CLI (no contextvars in fresh threads)
 _TRACING_ENABLED_GLOBAL: bool = False
 _TRACE_OUTPUT_DIR: Path = Path("data/training/raw")
+_TRACE_JOB_ID: Optional[int] = None  # When set, filenames use trace_job{N}_{cycle}.jsonl (parallel mode)
 
 
-def set_tracing_enabled(enabled: bool, output_dir: Optional[Path] = None) -> None:
+def set_tracing_enabled(enabled: bool, output_dir: Optional[Path] = None, job_id: Optional[int] = None) -> None:
     """Enable or disable tracing globally. Data Factory instrumentation for future model training."""
-    global _TRACING_ENABLED_GLOBAL, _TRACE_OUTPUT_DIR
+    global _TRACING_ENABLED_GLOBAL, _TRACE_OUTPUT_DIR, _TRACE_JOB_ID
     _TRACING_ENABLED_GLOBAL = enabled
     if output_dir is not None:
         _TRACE_OUTPUT_DIR = Path(output_dir)
+    _TRACE_JOB_ID = job_id
+
+
+def set_trace_job_id(job_id: Optional[int] = None) -> None:
+    """Set job_id for parallel trace filenames (trace_job{N}_{cycle}.jsonl). Prevents collisions."""
+    global _TRACE_JOB_ID
+    _TRACE_JOB_ID = job_id
 
 
 def is_tracing_enabled() -> bool:
@@ -168,7 +176,11 @@ def save_trace(trace: dict, output_dir: Optional[Path] = None) -> Optional[Path]
     output_dir = output_dir or _TRACE_OUTPUT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
     cycle_id = trace.get("cycle_id", 0)
-    filepath = output_dir / f"trace_{cycle_id}.jsonl"
+    # Parallel mode: trace_job{N}_{cycle}.jsonl to prevent collisions across jobs
+    if _TRACE_JOB_ID is not None:
+        filepath = output_dir / f"trace_job{_TRACE_JOB_ID:02d}_{cycle_id:05d}.jsonl"
+    else:
+        filepath = output_dir / f"trace_{cycle_id}.jsonl"
     filled = _fill_missing(trace)
     filepath.write_text(json.dumps(filled, ensure_ascii=False) + "\n", encoding="utf-8")
     return filepath

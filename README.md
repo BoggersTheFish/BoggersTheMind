@@ -146,11 +146,24 @@ python mind.py --headless --trace
 
 Traces are saved to `data/training/raw/trace_{cycle_id}.jsonl`. Each JSONL line has the full schema: `timestamp`, `cycle_id`, `graph_state_before`, `strongest_node`, `wave_propagation_steps`, `tensions_detected`, `hypothesis_queue`, `selected_hypothesis`, `query_pipeline_decisions`, `synthesis_output`, `graph_state_after`, `final_obsidian_note_path`, `metadata`.
 
+### Parallel Cloud Generation (Recommended)
+
+Scale trace generation using **GitHub Actions parallel matrix** — free tier, maximum throughput:
+
+1. Go to **Actions** → **Generate Traces — Parallel Cloud Factory** → **Run workflow**
+2. Use defaults: **total_cycles: 2000**, **num_jobs: 12**
+3. Each of 12 jobs runs ~167 cycles in parallel; traces use `trace_job{N}_{cycle}.jsonl` (no collisions)
+4. Merge job commits all traces in one push
+
+**Estimated time**: ~25–30 min for 2000 traces (12 parallel runners, ~45s/cycle).  
+**Trace yield**: ~2000 per run; trigger multiple runs to reach 80k+.
+
 ### Scaling
 
 - **Local**: Run `--mode continuous` overnight; traces accumulate in `data/training/raw/`.
 - **GitHub Actions**: Set repo variable `GENERATE_TRACES=true` (Settings → Actions → Variables). The workflow will run the generator and commit traces.
 - **Batch**: Use `--mode batch --cycles 1000` for a fixed run; combine multiple runs to reach 80k+ traces.
+- **Parallel**: Use `generate-traces-parallel.yml` for 2000 cycles / 12 jobs (recommended for scale).
 
 ---
 
