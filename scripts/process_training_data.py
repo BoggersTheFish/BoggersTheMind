@@ -2,6 +2,7 @@
 """
 Process raw TS traces into ShareGPT-format training data for LoRA fine-tuning.
 Filters low-quality traces, converts to conversation format, outputs ready-to-train JSONL.
+Exits with code 1 if zero rows pass filters (no empty JSONL left behind).
 
 This data is uniquely powerful: each trace captures the full internal cognitive process
 of one autonomous cycle — strongest-node selection, wave propagation, tension detection,
@@ -226,6 +227,7 @@ def main() -> None:
     args = parser.parse_args()
 
     from rich.console import Console
+    from rich.panel import Panel
     from rich.table import Table
 
     console = Console()
@@ -257,6 +259,21 @@ def main() -> None:
         console.print("\n[dim]Drop reasons:[/dim]")
         for reason, count in sorted(stats["drop_reasons"].items(), key=lambda x: -x[1]):
             console.print(f"  {reason}: {count}")
+
+    if stats["kept"] == 0:
+        out_path = Path(stats["output_path"])
+        if out_path.exists() and out_path.stat().st_size == 0:
+            out_path.unlink()
+        console.print()
+        console.print(Panel.fit(
+            "[bold red]ZERO ROWS KEPT[/bold red]\n\n"
+            "No traces passed quality filters (synthesis length, graph state, duration, etc.). "
+            "Downstream training would be empty - fix raw traces or relax filters.\n\n"
+            "[dim]Exiting with code 1 so CI / full_cloud_train fails fast.[/dim]",
+            title="process_training_data.py",
+            border_style="red",
+        ))
+        sys.exit(1)
 
     console.print(f"\n[green]Done.[/green] Ready-to-train data: [cyan]{stats['output_path']}[/cyan]")
 

@@ -9,6 +9,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Optional, Tuple
 
 # Ensure project root is on path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -38,7 +39,38 @@ def _estimate_tokens(jsonl_path: Path) -> int:
             line = line.strip()
             if line:
                 total_chars += len(line)
+    if total_chars == 0:
+        return 0
     return max(1, total_chars // 4)
+
+
+def _count_training_examples(jsonl_path: Path) -> Tuple[int, Optional[str]]:
+    """
+    Count JSONL rows with non-empty ShareGPT conversations or chat messages.
+    Returns (count, None) if ok; (0, reason) if file is empty or unusable.
+    """
+    if not jsonl_path.exists():
+        return 0, "file does not exist"
+    if jsonl_path.stat().st_size == 0:
+        return 0, "file is empty (0 bytes)"
+    n = 0
+    with open(jsonl_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            conv = obj.get("conversations")
+            msgs = obj.get("messages")
+            turns = conv if isinstance(conv, list) else msgs if isinstance(msgs, list) else None
+            if turns and len(turns) > 0:
+                n += 1
+    if n == 0:
+        return 0, "0 training examples (no valid JSONL rows with conversations/messages)"
+    return n, None
 
 
 def main() -> None:
@@ -75,6 +107,11 @@ def main() -> None:
         action="store_true",
         help="Print commands and cost estimate only, do not upload",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit with code 1 if the data file is empty or has no training examples (also applies to dry-run)",
+    )
     args = parser.parse_args()
 
     # Resolve data file
@@ -94,17 +131,35 @@ def main() -> None:
             print(f"Error: {data_file} not found.", file=sys.stderr)
             sys.exit(1)
 
+    from rich.console import Console
+    from rich.panel import Panel
+
+    console = Console()
+
+    n_examples, bad_reason = _count_training_examples(data_file)
+    if n_examples == 0:
+        console.print()
+        console.print(Panel.fit(
+            "[bold yellow]WARNING[/bold yellow]  [yellow]Selected file is empty or has 0 training examples - "
+            "training will fail.[/yellow]\n\n"
+            f"[dim]{data_file}[/dim]\n"
+            f"[dim]{bad_reason}[/dim]\n\n"
+            "[dim]Use --strict to exit non-zero in CI; fix the file or run process_training_data.py first.[/dim]",
+            title="upload_to_together.py",
+            border_style="yellow",
+        ))
+        if args.strict:
+            sys.exit(1)
+        if not args.dry_run:
+            sys.exit(1)
+
     model_str = MODELS[args.model]
     est_tokens = _estimate_tokens(data_file)
     n_epochs = args.n_epochs
     total_tokens = est_tokens * n_epochs
     est_cost = (total_tokens / 1_000_000) * COST_PER_M_TOKENS
 
-    from rich.console import Console
-    from rich.panel import Panel
     from rich.table import Table
-
-    console = Console()
 
     console.print(Panel.fit(
         "[bold]Together AI LoRA Fine-Tuning - BoggersTheMind-1[/bold]",
@@ -125,8 +180,8 @@ def main() -> None:
 
     # ShareGPT uses "conversations" with "from"/"value" — Together expects "messages" with "role"/"content"
     # Convert on-the-fly when uploading, or use a converted file
-    console.print("\n[dim]Note: ShareGPT format (conversations/from/value) must be converted to Together format (messages/role/content).[/dim]")
-    console.print("[dim]The 'together' CLI and API accept JSONL with 'messages' key. Run convert_sharegpt_to_together() if needed.[/dim]")
+    console.print("\n[dim]Note: ShareGPT format (conversations/from/value) must become Together JSONL (messages/role/content).[/dim]")
+    console.print("[dim]This script converts automatically when you upload (non-dry-run); for manual CLI, convert lines the same way as in main() below.[/dim]")
 
     # Exact CLI command (user runs after manual upload)
     api_key = os.environ.get("TOGETHER_API_KEY", "")
@@ -176,7 +231,10 @@ def main() -> None:
 """)
 
     if args.dry_run:
-        console.print("\n[green]Dry run complete. No upload performed.[/green]")
+        if n_examples == 0:
+            console.print("\n[yellow]Dry run finished (see warning above). No upload performed.[/yellow]")
+        else:
+            console.print("\n[green]Dry run complete. No upload performed.[/green]")
         return
 
     # Optional: convert and upload

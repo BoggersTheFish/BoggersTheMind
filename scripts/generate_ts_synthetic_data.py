@@ -8,6 +8,7 @@ import argparse
 import os
 import signal
 import sys
+import threading
 from pathlib import Path
 
 # Ensure project root is on path
@@ -69,9 +70,9 @@ def main() -> None:
     from interface.tui import TUIState
 
     from rich.console import Console
-    from rich.progress import Progress, SpinnerColumn, TextColumn
 
-    console = Console()
+    # Legacy Windows consoles (cp1252) cannot render Rich spinners (Braille); avoid Unicode live widgets.
+    console = Console(legacy_windows=False) if sys.platform == "win32" else Console()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     graph = UniversalLivingGraph()
@@ -99,16 +100,15 @@ def main() -> None:
     elif args.mode == "github":
         max_cycles = 4  # ~3 min at 45s/cycle, fits Actions timeout
 
-    shutdown_requested = False
+    shutdown_event = threading.Event()
 
-    def on_sigint(*_):
-        nonlocal shutdown_requested
-        shutdown_requested = True
+    def on_shutdown_signal(*_):
+        shutdown_event.set()
         console.print("\n[dim]Graceful shutdown requested. Finishing current cycle...[/dim]")
 
-    signal.signal(signal.SIGINT, on_sigint)
+    signal.signal(signal.SIGINT, on_shutdown_signal)
     if hasattr(signal, "SIGTERM"):
-        signal.signal(signal.SIGTERM, on_sigint)
+        signal.signal(signal.SIGTERM, on_shutdown_signal)
 
     console.print(f"[bold]TS Data Factory[/bold] - mode={args.mode}, output={args.output_dir}")
     if args.fast:
@@ -129,30 +129,29 @@ def main() -> None:
 
     on_cycle_cb = on_cycle if max_cycles else None
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        progress.add_task("Generating traces...", total=None)
-        try:
-            run_autonomous_explorer(
-                graph,
-                mode_manager,
-                state=state,
-                headless=True,
-                max_cycles=max_cycles,
-                start_cycle=start_cycle,
-                on_cycle_complete=on_cycle_cb,
-            )
-        except KeyboardInterrupt:
-            pass
+    console.print("[dim]Generating traces...[/dim]")
+    try:
+        run_autonomous_explorer(
+            graph,
+            mode_manager,
+            state=state,
+            headless=True,
+            max_cycles=max_cycles,
+            start_cycle=start_cycle,
+            on_cycle_complete=on_cycle_cb,
+            shutdown_event=shutdown_event,
+        )
+    except KeyboardInterrupt:
+        shutdown_event.set()
 
-    if job_id is not None and max_cycles:
+    if job_id is not None and max_cycles and not shutdown_event.is_set():
         console.print(f"[Job {job_id}] FINISHED chunk - {max_cycles} cycles completed")
 
     trace_count = len(list(args.output_dir.glob("trace_*.jsonl")))
-    console.print(f"\n[green]Done.[/green] Traces saved: [cyan]{trace_count}[/cyan] in {args.output_dir}")
+    if shutdown_event.is_set():
+        console.print(f"\n[yellow]Stopped after graceful shutdown.[/yellow] Traces in [cyan]{args.output_dir}[/cyan]: [cyan]{trace_count}[/cyan]")
+    else:
+        console.print(f"\n[green]Done.[/green] Traces saved: [cyan]{trace_count}[/cyan] in {args.output_dir}")
 
 
 if __name__ == "__main__":

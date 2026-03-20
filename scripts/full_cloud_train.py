@@ -14,6 +14,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from rich.console import Console
+from rich.panel import Panel
+
 # Ensure project root is on path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -34,9 +37,109 @@ def _run(cmd: list[str], cwd: Path | None = None) -> int:
     return subprocess.run(cmd, cwd=cwd or Path.cwd()).returncode
 
 
-def _cost_estimate(cycles: int, epochs: int, trace_hrs: float, train_hrs: float) -> float:
+def _cost_estimate(trace_hrs: float, train_hrs: float) -> float:
     """Rough total cost in USD."""
     return (trace_hrs + train_hrs) * HOURLY_RATE
+
+
+def _run_unsloth_qlora_training(
+    model_name: str,
+    train_path: Path,
+    output_dir: Path,
+    epochs: int,
+) -> None:
+    """
+    Step 3: Load base model in 4-bit, attach LoRA, run SFTTrainer on messages JSONL.
+    Must run on a CUDA machine with unsloth + trl installed.
+    """
+    import torch
+    from datasets import load_dataset
+    from unsloth import FastLanguageModel
+    from trl import SFTConfig, SFTTrainer
+
+    max_seq_length = 2048
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    dataset = load_dataset("json", data_files={"train": str(train_path)}, split="train")
+    if len(dataset) == 0:
+        raise ValueError(f"No rows in {train_path}; check Step 2 output.")
+
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=model_name,
+        max_seq_length=max_seq_length,
+        dtype=None,
+        load_in_4bit=True,
+    )
+
+    model = FastLanguageModel.get_peft_model(
+        model,
+        r=16,
+        target_modules=[
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ],
+        lora_alpha=16,
+        lora_dropout=0.05,
+        bias="none",
+        use_gradient_checkpointing="unsloth",
+        random_state=3407,
+        max_seq_length=max_seq_length,
+    )
+
+    def format_chat(example: dict) -> dict:
+        messages = example.get("messages", [])
+        text = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+        return {"text": text}
+
+    dataset = dataset.map(
+        format_chat,
+        remove_columns=dataset.column_names,
+        num_proc=1,
+    )
+
+    bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+    fp16 = not bf16
+
+    training_args = SFTConfig(
+        max_seq_length=max_seq_length,
+        dataset_text_field="text",
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=4,
+        warmup_steps=10,
+        num_train_epochs=epochs,
+        learning_rate=2e-4,
+        logging_steps=5,
+        save_strategy="epoch",
+        save_total_limit=2,
+        output_dir=str(output_dir),
+        optim="adamw_8bit",
+        seed=3407,
+        fp16=fp16,
+        bf16=bf16,
+        report_to="none",
+        dataloader_pin_memory=False,
+    )
+
+    trainer = SFTTrainer(
+        model=model,
+        train_dataset=dataset,
+        tokenizer=tokenizer,
+        args=training_args,
+    )
+
+    trainer.train()
+    model.save_pretrained(str(output_dir))
+    tokenizer.save_pretrained(str(output_dir))
+    print(f"Saved LoRA + tokenizer to {output_dir}")
 
 
 def main() -> None:
@@ -67,16 +170,12 @@ def main() -> None:
     raw_dir = root / "data" / "training" / "raw"
     final_dir = root / "data" / "training" / "final"
 
-    from rich.console import Console
-    from rich.panel import Panel
-    from rich.table import Table
-
     console = Console()
 
     # Cost estimate at start
     trace_hrs = args.cycles / CYCLES_PER_HOUR
     train_hrs = 0.5 + (args.epochs * 0.3)  # rough: 1 epoch ~30 min
-    est_cost = _cost_estimate(args.cycles, args.epochs, trace_hrs, train_hrs)
+    est_cost = _cost_estimate(trace_hrs, train_hrs)
 
     console.print(Panel.fit(
         "[bold]BoggersTheMind-1 — Full Cloud Pipeline[/bold]\n"
@@ -109,8 +208,6 @@ def main() -> None:
         sys.executable,
         str(root / "scripts" / "process_training_data.py"),
         "--min-duration", "0",
-        "--raw-dir", str(raw_dir),
-        "--output-dir", str(final_dir),
     ], cwd=root)
     if ret != 0:
         console.print("[red]Processing failed.[/red]")
@@ -153,86 +250,15 @@ def main() -> None:
     model_name = MODELS[args.model]
     output_dir = root / "outputs" / "boggersmind-1"
 
-    train_script = f"""
-import json
-from datasets import load_dataset
-from unsloth import FastLanguageModel
-from trl import SFTTrainer, SFTConfig
-
-max_seq_length = 2048
-model_name = "{model_name}"
-data_path = {repr(str(train_path))}
-output_dir = {repr(str(output_dir))}
-epochs = {args.epochs}
-
-dataset = load_dataset("json", data_files={{"train": str(data_path)}}, split="train")
-
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name=model_name,
-    max_seq_length=max_seq_length,
-    load_in_4bit=True,
-    load_in_16bit=False,
-)
-
-model = FastLanguageModel.get_peft_model(
-    model,
-    r=16,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-    lora_alpha=16,
-    lora_dropout=0.05,
-    bias="none",
-    use_gradient_checkpointing="unsloth",
-    random_state=3407,
-    max_seq_length=max_seq_length,
-)
-
-def format_chat(example):
-    messages = example.get("messages", [])
-    text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=False,
-    )
-    return {{"text": text}}
-
-dataset = dataset.map(format_chat, remove_columns=dataset.column_names, num_proc=1)
-
-trainer = SFTTrainer(
-    model=model,
-    train_dataset=dataset,
-    tokenizer=tokenizer,
-    args=SFTConfig(
-        max_seq_length=max_seq_length,
-        dataset_text_field="text",
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=4,
-        warmup_steps=5,
-        num_train_epochs=epochs,
-        logging_steps=1,
-        output_dir=output_dir,
-        optim="adamw_8bit",
-        seed=3407,
-        fp16=not __import__("torch").cuda.is_bf16_supported(),
-        bf16=__import__("torch").cuda.is_bf16_supported(),
-    ),
-)
-
-trainer.train()
-model.save_pretrained(output_dir)
-tokenizer.save_pretrained(output_dir)
-print("Saved to", output_dir)
-"""
-
-    train_script_path = root / "scripts" / "_unsloth_train_temp.py"
-    train_script_path.write_text(train_script, encoding="utf-8")
-
     try:
-        ret = _run([sys.executable, str(train_script_path)], cwd=root)
-    finally:
-        train_script_path.unlink(missing_ok=True)
-
-    if ret != 0:
-        console.print("[red]Unsloth training failed.[/red]")
+        _run_unsloth_qlora_training(
+            model_name=model_name,
+            train_path=train_path,
+            output_dir=output_dir,
+            epochs=args.epochs,
+        )
+    except Exception as e:
+        console.print(f"[red]Unsloth training failed: {e}[/red]")
         sys.exit(1)
 
     console.print(f"\n[green]Done.[/green] Model saved to [cyan]{output_dir}[/cyan]")

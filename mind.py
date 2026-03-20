@@ -27,7 +27,7 @@ def heartbeat(state: TUIState, graph: UniversalLivingGraph) -> None:
 
         try:
             import ollama
-            ollama.list()
+            ollama.Client(timeout=5.0).list()
             state.ollama_ready = True
         except Exception:
             state.ollama_ready = False

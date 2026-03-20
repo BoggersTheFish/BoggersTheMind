@@ -1,6 +1,9 @@
 #!/bin/bash
 # One-command setup for Vast.ai / RunPod — installs deps, runs full cloud pipeline.
 # Usage: bash scripts/run_on_pod.sh [--cycles 1000] [--model qwen14b|llama8b] [--epochs 1]
+#
+# Python 3.12 is required (Unsloth / training wheels). If venv was created with another
+# Python, delete ./venv and re-run this script.
 
 set -e
 cd "$(dirname "$0")/.."
@@ -9,11 +12,15 @@ ROOT="$(pwd)"
 echo "=== BoggersTheMind-1 — Pod Setup ==="
 echo "Root: $ROOT"
 
-# 1. Python venv (if not already in one)
+# 1. Python 3.12 venv (if not already in one)
 if [ -z "$VIRTUAL_ENV" ]; then
+    if ! command -v python3.12 &>/dev/null; then
+        echo "ERROR: python3.12 not found. Install Python 3.12 for Unsloth compatibility."
+        exit 1
+    fi
     if [ ! -d "venv" ]; then
-        echo "Creating venv..."
-        python3 -m venv venv
+        echo "Creating venv with python3.12..."
+        python3.12 -m venv venv
     fi
     echo "Activating venv..."
     . venv/bin/activate

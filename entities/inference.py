@@ -17,6 +17,12 @@ MIN_INTERVAL = 60.0
 MODEL = "llama3.2"
 
 
+def _client() -> ollama.Client:
+    """HTTP client with bounded wait (httpx timeout); avoids indefinite hang when Ollama is down."""
+    sec = float(os.environ.get("OLLAMA_TIMEOUT", "120"))
+    return ollama.Client(timeout=sec)
+
+
 def _throttle() -> bool:
     """Return True if we can make a call, False if we must wait."""
     # Fast mode disables throttle on GitHub runners (fast CPUs, no laptop limits)
@@ -56,7 +62,7 @@ def infer(
     user_msg = f"{context}User: {prompt}"
 
     try:
-        response = ollama.chat(model=MODEL, messages=[
+        response = _client().chat(model=MODEL, messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user_msg},
         ])
@@ -86,7 +92,7 @@ def synthesize(
     user_msg = f"Knowledge context:\n{context}\n\nUser question: {query}\n\nAnswer:"
 
     try:
-        response = ollama.chat(model=MODEL, messages=[
+        response = _client().chat(model=MODEL, messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user_msg},
         ])

@@ -111,15 +111,18 @@ Enable the workflow, grant `contents: write`, and push. Your mind explores in th
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.10+ for local `mind.py` (newer versions such as 3.14 are fine for day-to-day dev)
+- **Python 3.12** on GPU pods — `scripts/run_on_pod.sh` creates a 3.12 venv for Unsloth compatibility
 - [Ollama](https://ollama.ai) with `llama3.2` (local runs)
 - Internet (Wikipedia API)
+
+**Data factory & training:** **Linux pod** (Vast.ai / RunPod) or **WSL** is the primary environment. Native Windows is optional for light local testing.
 
 ---
 
 ## Phase 1 — TS Data Factory
 
-Phase 1 generates 80k–150k high-quality structured reasoning traces for future LoRA fine-tuning of BoggersTheMind-1. Each trace captures the *internal cognitive process* of one full autonomous cycle.
+Phase 1 generates 80k–150k high-quality structured reasoning traces for future LoRA fine-tuning of BoggersTheMind-1. Each trace captures the *internal cognitive process* of one full autonomous cycle. Run large batches on a **Linux pod or WSL** when possible.
 
 ### Run commands
 
@@ -192,6 +195,8 @@ Output: `data/training/final/boggersmind-ts-traces-{timestamp}.jsonl` in ShareGP
 
 **Quality filters** (configurable in script): duration ≥ 10s, non-empty synthesis, graph has nodes.
 
+If **no rows pass** the filters, the script prints a clear error panel and **exits with code 1** (so `full_cloud_train.py` and CI fail fast instead of writing an empty JSONL).
+
 ### 2. Upload and fine-tune (Together AI)
 
 ```bash
@@ -201,9 +206,14 @@ export TOGETHER_API_KEY=your_key
 # Dry run: print commands and cost estimate only
 python scripts/upload_to_together.py --dry-run
 
+# CI: fail if the default/latest JSONL is empty or has no training rows
+python scripts/upload_to_together.py --dry-run --strict
+
 # Upload and create LoRA fine-tuning job
 python scripts/upload_to_together.py
 ```
+
+Empty or invalid JSONL (0 bytes or no valid `conversations` / `messages` rows) prints a **yellow warning**. **`--strict`** exits with code **1** (including dry-run). A real upload **always exits 1** in that case so you do not push garbage to Together.
 
 **LoRA config**: rank=64, alpha=16, dropout=0.05, target_modules=all-linear.
 
@@ -259,7 +269,7 @@ Train **BoggersTheMind-1** end-to-end on a rented GPU pod: generate traces → p
 | **RunPod** | RTX 4090 | ~$0.44 | [runpod.io](https://www.runpod.io/console/pods) |
 | **RunPod** | A100 40GB | ~$0.59 | [runpod.io](https://www.runpod.io/console/pods) |
 
-Pick an **RTX 4090** or **A100 40GB** instance. SSH into the pod once it’s running.
+Pick an **RTX 4090** or **A100 40GB** instance. SSH into the pod once it’s running. The pod image must have **`python3.12`** available (`run_on_pod.sh` uses it to create the venv). If an old `venv/` was built with another Python, delete it and re-run the script.
 
 ### 2. Run the pipeline
 
@@ -268,7 +278,7 @@ Pick an **RTX 4090** or **A100 40GB** instance. SSH into the pod once it’s run
 git clone https://github.com/YOUR_USER/BoggersTheHiveMind.git
 cd BoggersTheHiveMind
 
-# One command: install + generate + process + train
+# One command: Python 3.12 venv, install deps, generate + process + train
 bash scripts/run_on_pod.sh --cycles 1000 --model qwen14b --epochs 1
 ```
 
